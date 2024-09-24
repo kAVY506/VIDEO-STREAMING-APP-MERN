@@ -1,16 +1,13 @@
-const { MONGO_URI } = require('../env/env')
-const mongoose = require('mongoose'); // npm install mongoose
+const mongoose = require('mongoose');
 
-const connectToDatabase = () => {
-    // Connect to MongoDB
-    mongoose.connect(MONGO_URI, {});
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB successfully connected');
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+};
 
-    // Event listeners for MongoDB connection
-    mongoose.connection.on('connected', () => {
-        console.log("Connected to MongoDB successfully");
-    })
-}
-
-module.exports = {
-    connectToDatabase
-}
+module.exports = connectDB;

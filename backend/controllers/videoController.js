@@ -1,89 +1,113 @@
-import { createError } from "../error.js";
-import User from "../models/User.js";
-import Video from "../models/Video.js";
+const Video = require('../models/videoModel');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 
-export const addVideo = async (req, res, next) => {
-  const newVideo = new Video({ userId: req.user.id, ...req.body });
-  try {
-    const savedVideo = await newVideo.save();
-    res.status(200).json(savedVideo);
-  } catch (err) {
-    next(err);
-  }
-};
-export const updateVideo = async (req, res, next) => {
-  try {
-    const video = await Video.findById(req.params.id);
-    if (!video) return next(createError(404, "Video not found!"));
 
-    if (req.user.id === video.userId) {
-      const updatedVideo = await Video.findByIdAndUpdate(
-        req.params.id,
-        { $set: req.body },
-        { new: true }
-      );
-      res.status(200).json(updatedVideo);
-    } else return next(createError(403, "You can update only your video!"));
-  } catch (err) {
-    next(err);
-  }
-};
-export const deleteVideo = async (req, res, next) => {
-  try {
-    const video = await Video.findById(req.params.id);
-    if (!video) return next(createError(404, "Video not found!"));
 
-    if (req.user.id === video.userId) {
-      await Video.findByIdAndDelete(req.params.id);
-      res.status(200).json("The video has been deleted");
-    } else return next(createError(403, "You can delete only your video!"));
-  } catch (err) {
-    next(err);
+// Set up Multer to store files locally
+const uploadDir = path.join(__dirname, '../uploads/videos');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Multer setup to handle file uploads and store them in the "uploads/videos" folder
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir); // Save files in uploads/videos
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname); // Extract the file extension
+    cb(null, `video-${uniqueSuffix}${ext}`); // Create a unique filename
   }
-};
-export const getVideo = async (req, res, next) => {
-  try {
-    const video = await Video.findById(req.params.id);
-    res.status(200).json(video);
-  } catch (err) {
-    next(err);
+});
+
+const upload = multer({ storage });
+
+
+
+// Video Upload
+exports.uploadVideo = async (req, res) => {
+  const { title, description, tags } = req.body;
+  const file = req.file;
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
   }
-};
-export const addView = async (req, res, next) => {
+
   try {
-    await Video.findByIdAndUpdate(req.params.id, {
-      $inc: { views: 1 },
+    // Construct the file URL to serve the video from the local uploads directory
+    const videoUrl = `/uploads/videos/${file.filename}`;
+
+    const userId = req.user ? req.user.id : 'mock-user-id'; 
+
+    // Save video metadata to MongoDB
+    const video = new Video({
+      title,
+      description,
+      tags: tags.split(','),
+      videoUrl, // Save the local video URL
+      uploadedBy: userId, 
     });
-    res.status(200).json("The view has been increase");
-  } catch (err) {
-    next(err);
+
+    await video.save();
+    res.json(video);
+  } catch (error) {
+    console.error('Error uploading video:', error);
+    res.status(500).json({ error: 'Error uploading video' });
   }
 };
 
+// Video Streaming from local storage
+exports.streamVideo = async (req, res) => {
+  const videoId = req.params.id;
 
-
-
-
-
-export const getByTag = async (req, res, next) => {
-  const tags = req.query.tags.split(",");
-  console.log(tags);
   try {
-    const videos = await Video.find({ tags: { $in: tags } }).limit(20);
-    res.status(200).json(videos);
+    // Find the video by ID in MongoDB
+    const video = await Video.findById(videoId);
+
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+
+    const videoPath = path.join(__dirname, '..', video.videoUrl);
+
+    // Check if the video file exists
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: 'Video file not found' });
+    }
+
+    // Send the URL for the frontend to stream
+    res.json({ videoUrl: `http://localhost:7000${video.videoUrl}` }); 
   } catch (err) {
-    next(err);
+    console.error('Error streaming video:', err);
+    res.status(500).json({ error: 'Error streaming video' });
   }
 };
 
-export const search = async (req, res, next) => {
-  const query = req.query.q;
+// Video Search and Listing
+exports.getVideos = async (req, res) => {
+  const { search, page = 1, limit = 10 } = req.query;
+  const query = search ? { title: new RegExp(search, 'i') } : {}; // Search functionality
+
   try {
-    const videos = await Video.find({
-      title: { $regex: query, $options: "i " },
-    }).limit(40);
-    res.status(200).json(videos);
+    // Fetch video metadata
+    const videos = await Video.find(query)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      
+
+    const total = await Video.countDocuments(query);
+
+    // Return videos and pagination info
+    res.json({
+      videos,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
-    next(err);
+    console.error('Error fetching videos:', err);
+    res.status(500).json({ error: 'Error fetching videos' });
   }
 };
