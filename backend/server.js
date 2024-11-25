@@ -11,11 +11,7 @@ app.use(cors());
 
 // Connect to database
 connectDB();
-app.get('/api/videos/:id', (req, res) => {
-  const videoId = req.params.id;
-  const videoPath = path.join(__dirname, 'uploads', `${videoId}.mp4`);
-  res.json({ videoUrl: `http://localhost:7000/uploads/${videoId}.mp4` }); // Returns full video URL
-});
+
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

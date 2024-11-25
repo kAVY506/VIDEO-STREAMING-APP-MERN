@@ -62,27 +62,44 @@ exports.uploadVideo = async (req, res) => {
 // Video Streaming from local storage
 exports.streamVideo = async (req, res) => {
   const videoId = req.params.id;
-
   try {
-    // Find the video by ID in MongoDB
     const video = await Video.findById(videoId);
 
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
 
-    const videoPath = path.join(__dirname, '..', video.videoUrl);
+    const videoPath = path.join(__dirname, '..', video.videoUrl); // Get local file path
+    const stat = fs.statSync(videoPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
 
-    // Check if the video file exists
-    if (!fs.existsSync(videoPath)) {
-      return res.status(404).json({ error: 'Video file not found' });
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = (end - start) + 1;
+      const file = fs.createReadStream(videoPath, { start, end });
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': 'video/mp4',
+      });
+      file.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': 'video/mp4',
+      });
+      fs.createReadStream(videoPath).pipe(res);
     }
-
-    // Send the URL for the frontend to stream
-    res.json({ videoUrl: `http://localhost:7000${video.videoUrl}` }); 
   } catch (err) {
     console.error('Error streaming video:', err);
-    res.status(500).json({ error: 'Error streaming video' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error streaming video' });
+    }
   }
 };
 
